@@ -9,10 +9,17 @@ from PIL import Image, ImageDraw, ImageFont
 import textwrap
 
 from pathlib import Path
+from queue import Queue
+
 Path("generated").mkdir(parents=True, exist_ok=True)
+
+
+
 
 # Set up the Telegram bot
 bot = telebot.TeleBot(YOUR_BOT_TOKEN)
+
+request_queue = Queue()
 
 VOICE = "bn-BD-NabanitaNeural"
 MP3_OUTPUT_PATH = "generated/audio.mp3"
@@ -116,18 +123,48 @@ def start(message):
 
 @bot.message_handler(func=lambda message: True)
 def reply(message):
-    replyMessage = bot.reply_to(message, "Requesting data from the url")
-    try:
+    if request_queue.empty():
+        # If the queue is empty, add the user's message to the queue and do not send a reply
+        request_queue.put(message)
+    else:
+        # If the queue is not empty, get the first message in the queue
+        first_message = request_queue.queue[0]
         
-        getDataFromUrl(message.text,replyMessage)
-        bot.edit_message_text("Video Generated. sending video to you", replyMessage.chat.id,replyMessage.id)
-        document = open(MP4_OUTPUT_PATH, 'rb')
-        bot.send_document(document=document,reply_to_message_id=message.id,chat_id=message.chat.id)
-        bot.edit_message_text("Everything Complite", replyMessage.chat.id,replyMessage.id)
+        # Check if the user's message is the same as the first message in the queue
+        if message.chat.id == first_message.chat.id and message.message_id == first_message.message_id:
+            # If the user's message is the same as the first message in the queue, send a reply with the queue number
+            queue_number = request_queue.index(message) + 1
+            bot.reply_to(message, f"Your request is in queue position {queue_number}.")
+        else:
+            # If the user's message is not the same as the first message in the queue, add the message to the queue and do not send a reply
+            request_queue.put(message)
 
-    except Exception as e:
-        bot.edit_message_text(e, replyMessage.chat.id,replyMessage.id)
    
+# Define a function to process requests from the queue
+def process_requests():
+    while True:
+        # Check if there are any requests in the queue
+        if not request_queue.empty():
+            # Get the next request from the queue
+            message = request_queue.get()
+            
+            # Process the request
+            replyMessage = bot.reply_to(message, "Requesting data from the url")
+            try:
+                
+                getDataFromUrl(message.text,replyMessage)
+                bot.edit_message_text("Video Generated. sending video to you", replyMessage.chat.id,replyMessage.id)
+                document = open(MP4_OUTPUT_PATH, 'rb')
+                bot.send_document(document=document,reply_to_message_id=message.id,chat_id=message.chat.id)
+                bot.edit_message_text("Everything Complite", replyMessage.chat.id,replyMessage.id)
+
+            except Exception as e:
+                bot.edit_message_text(e, replyMessage.chat.id,replyMessage.id)
+        
+# Start the request processing loop in a separate thread
+import threading
+threading.Thread(target=process_requests, daemon=True).start()
+
 
 # Start the bot
 bot.polling()
